@@ -2,7 +2,6 @@ package ca.copolii.swapcrash
 
 import android.content.Context
 import android.graphics.SurfaceTexture
-import android.opengl.EGL14
 import android.opengl.GLES20
 import android.opengl.GLUtils
 import android.util.AttributeSet
@@ -11,6 +10,7 @@ import android.view.TextureView
 import java.util.concurrent.atomic.AtomicInteger
 import javax.microedition.khronos.egl.*
 import javax.microedition.khronos.opengles.GL11
+import kotlin.random.Random
 
 private val INSTANCEID = AtomicInteger(0)
 
@@ -23,7 +23,11 @@ class BoomerTextureView : TextureView {
 
     constructor(context: Context, attrs: AttributeSet) : super(context, attrs)
 
-    constructor(context: Context, attrs: AttributeSet, defStyleAttr: Int) : super(context, attrs, defStyleAttr)
+    constructor(context: Context, attrs: AttributeSet, defStyleAttr: Int) : super(
+        context,
+        attrs,
+        defStyleAttr
+    )
 
     constructor(context: Context, attrs: AttributeSet, defStyleAttr: Int, defStyleRes: Int) : super(
         context,
@@ -71,6 +75,13 @@ class BoomerTextureView : TextureView {
         @Volatile
         private var done: Boolean = false
 
+        val BLOCK_WIDTH = 80
+        val BLOCK_SPEED = 2
+        var xpos: Int = 0
+        var xdir: Int = 0
+        var width: Int = 0
+        var height = 0
+
         private val A: Float
         private val R: Float
         private val G: Float
@@ -91,16 +102,20 @@ class BoomerTextureView : TextureView {
             }
         }
 
-        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, w: Int, h: Int) {
             Log.d(TAG, "SurfaceTexture available (${width}x${height})")
             synchronized(LOCK) {
                 surfaceTexture = surface
+                width = w
+                height = h
                 LOCK.notify()
             }
         }
 
-        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, w: Int, h: Int) {
             Log.d(TAG, "SurfaceTexture resized: (${width}x${height})")
+            width = w
+            height = h
         }
 
         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
@@ -147,6 +162,10 @@ class BoomerTextureView : TextureView {
         private fun renderLoop() {
             Log.d(TAG, "Entering render loop")
 
+            xpos = Random.nextInt(BLOCK_WIDTH)
+            xdir = if (Random.nextBoolean()) BLOCK_SPEED else -BLOCK_SPEED
+            Log.d(TAG, "Animating " + width + "x" + height + " EGL surface")
+
             run loop@{
                 while (!done) {
                     synchronized(LOCK) {
@@ -155,8 +174,8 @@ class BoomerTextureView : TextureView {
 
                         checkCurrent()
 
-                        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                        GLES20.glClearColor(R, G, B, A)
+                        update()
+                        drawFrame()
 
                         if (!mEgl!!.eglSwapBuffers(mEglDisplay, mEglSurface)) {
                             Log.e(TAG, "Cannot swap buffers!")
@@ -176,6 +195,27 @@ class BoomerTextureView : TextureView {
             Log.d(TAG, "Exiting render loop")
         }
 
+        private fun update() {
+            // Advance state
+
+            xpos += xdir
+            if (xpos <= -BLOCK_WIDTH / 2 || xpos >= width - BLOCK_WIDTH / 2) {
+                xdir = -xdir
+            }
+        }
+
+        private fun drawFrame() {
+            // Still alive, render a frame.
+            GLES20.glClearColor(R, G, B, A)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+            GLES20.glScissor(xpos, height / 4, BLOCK_WIDTH, height / 2)
+            GLES20.glClearColor(1.0f, 0.0f, 0.0f, 1.0f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        }
+
         private fun initGL() {
             val egl: EGL10 = (EGLContext.getEGL() as EGL10)
             val display = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY)
@@ -183,12 +223,20 @@ class BoomerTextureView : TextureView {
             mEglDisplay = display
 
             if (display === EGL10.EGL_NO_DISPLAY) {
-                throw RuntimeException("${instanceId}: eglGetDisplay failed " + GLUtils.getEGLErrorString(egl.eglGetError()))
+                throw RuntimeException(
+                    "${instanceId}: eglGetDisplay failed " + GLUtils.getEGLErrorString(
+                        egl.eglGetError()
+                    )
+                )
             }
 
             val version = IntArray(2)
             if (!egl.eglInitialize(display, version)) {
-                throw RuntimeException("${instanceId}: eglInitialize failed " + GLUtils.getEGLErrorString(egl.eglGetError()))
+                throw RuntimeException(
+                    "${instanceId}: eglInitialize failed " + GLUtils.getEGLErrorString(
+                        egl.eglGetError()
+                    )
+                )
             }
 
             val configChooser = MultiSampleConfigChooser(EGL_CLIENT_VERSION)
@@ -219,7 +267,11 @@ class BoomerTextureView : TextureView {
             }
 
             if (!egl.eglMakeCurrent(display, mEglSurface, mEglSurface, mEglContext)) {
-                throw RuntimeException("${instanceId}: eglMakeCurrent failed " + GLUtils.getEGLErrorString(egl.eglGetError()))
+                throw RuntimeException(
+                    "${instanceId}: eglMakeCurrent failed " + GLUtils.getEGLErrorString(
+                        egl.eglGetError()
+                    )
+                )
             }
             checkEglError()
 
@@ -228,10 +280,17 @@ class BoomerTextureView : TextureView {
         }
 
         private fun checkCurrent() {
-            if (mEglContext != mEgl!!.eglGetCurrentContext() || mEglSurface != mEgl!!.eglGetCurrentSurface(EGL10.EGL_DRAW)) {
+            if (mEglContext != mEgl!!.eglGetCurrentContext() || mEglSurface != mEgl!!.eglGetCurrentSurface(
+                    EGL10.EGL_DRAW
+                )
+            ) {
                 checkEglError()
                 if (!mEgl!!.eglMakeCurrent(mEglDisplay, mEglSurface, mEglSurface, mEglContext)) {
-                    throw RuntimeException("${instanceId}: eglMakeCurrent failed " + GLUtils.getEGLErrorString(mEgl!!.eglGetError()))
+                    throw RuntimeException(
+                        "${instanceId}: eglMakeCurrent failed " + GLUtils.getEGLErrorString(
+                            mEgl!!.eglGetError()
+                        )
+                    )
                 }
                 checkEglError()
             }
