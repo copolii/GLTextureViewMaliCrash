@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#008577</color>
+    <color name="colorPrimaryDark">#00574B</color>
+    <color name="colorAccent">#D81B60</color>
+
+    <color name="color1">#3cb44b</color>
+    <color name="color2">#ffe119</color>
+    <color name="color3">#911eb4</color>
+
+    <integer-array name="colors">
+        <item>@color/color1</item>
+        <item>@color/color2</item>
+        <item>@color/color3</item>
+    </integer-array>
+</resources>
